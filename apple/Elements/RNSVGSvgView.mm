@@ -64,20 +64,14 @@ using namespace facebook::react;
 
 - (void)updateProps:(Props::Shared const &)props oldProps:(Props::Shared const &)oldProps
 {
-  const auto &newProps = static_cast<const RNSVGSvgViewProps &>(*props);
+  const auto &newProps = *std::static_pointer_cast<const RNSVGSvgViewProps>(props);
 
   self.minX = newProps.minX;
   self.minY = newProps.minY;
   self.vbWidth = newProps.vbWidth;
   self.vbHeight = newProps.vbHeight;
-  id bbWidth = RNSVGConvertFollyDynamicToId(newProps.bbWidth);
-  if (bbWidth != nil) {
-    self.bbWidth = [RCTConvert RNSVGLength:bbWidth];
-  }
-  id bbHeight = RNSVGConvertFollyDynamicToId(newProps.bbHeight);
-  if (bbHeight != nil) {
-    self.bbHeight = [RCTConvert RNSVGLength:bbHeight];
-  }
+  self.bbWidth = [RNSVGLength lengthWithString:RCTNSStringFromString(newProps.bbWidth)];
+  self.bbHeight = [RNSVGLength lengthWithString:RCTNSStringFromString(newProps.bbHeight)];
   self.align = RCTNSStringFromStringNilIfEmpty(newProps.align);
   self.meetOrSlice = intToRNSVGVBMOS(newProps.meetOrSlice);
   if (RCTUIColorFromSharedColor(newProps.tintColor)) {
@@ -116,19 +110,6 @@ using namespace facebook::react;
   _invviewBoxTransform = CGAffineTransformIdentity;
   rendered = NO;
 }
-
-- (void)mountChildComponentView:(UIView<RCTComponentViewProtocol> *)childComponentView index:(NSInteger)index
-{
-  [super mountChildComponentView:childComponentView index:index];
-  [self invalidate];
-}
-
-- (void)unmountChildComponentView:(UIView<RCTComponentViewProtocol> *)childComponentView index:(NSInteger)index
-{
-  [super unmountChildComponentView:childComponentView index:index];
-  [self invalidate];
-}
-
 #endif // RCT_NEW_ARCH_ENABLED
 
 - (void)insertReactSubview:(RNSVGView *)subview atIndex:(NSInteger)atIndex
@@ -310,9 +291,14 @@ using namespace facebook::react;
     return;
   }
   _boundingBox = rect;
-  CGContextRef context = UIGraphicsGetCurrentContext();
 
-  [self drawToContext:context withRect:[self bounds]];
+#if TARGET_OS_OSX
+  CGContextRef context = [NSGraphicsContext currentContext].CGContext;
+#else
+  CGContextRef context = UIGraphicsGetCurrentContext();
+#endif
+
+  [self drawToContext:context withRect:rect];
 }
 
 - (RNSVGPlatformView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
@@ -340,29 +326,97 @@ using namespace facebook::react;
   return nil;
 }
 
-- (NSString *)getDataURLWithBounds:(CGRect)bounds
+- (NSString *)getDataURL
 {
-#if !TARGET_OS_OSX // [macOS]
-  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:bounds.size];
-  UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *_Nonnull rendererContext) {
-#else // [macOS
-  UIGraphicsBeginImageContextWithOptions(bounds.size, NO, 1);
-#endif // macOS]
-    [self clearChildCache];
-    [self drawRect:bounds];
-    [self clearChildCache];
-    [self invalidate];
-#if !TARGET_OS_OSX // [macOS]
-  }];
+#if TARGET_OS_OSX
+  NSImage *image = [[NSImage alloc] initWithSize:_boundingBox.size];
+  NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+                                                                  pixelsWide:_boundingBox.size.width
+                                                                  pixelsHigh:_boundingBox.size.height
+                                                               bitsPerSample:8
+                                                             samplesPerPixel:4
+                                                                    hasAlpha:YES
+                                                                    isPlanar:NO
+                                                              colorSpaceName:NSCalibratedRGBColorSpace
+                                                                 bytesPerRow:0
+                                                                bitsPerPixel:0];
+
+  [image addRepresentation:rep];
+  [image lockFocus];
+  
+  // flip y-axis on MacOS
+  CGContextRef context = [NSGraphicsContext currentContext].CGContext;
+  CGContextTranslateCTM(context, 0.0, _boundingBox.size.height);
+  CGContextScaleCTM(context, 1.0, -1.0);
+  [image drawAtPoint:NSMakePoint(0, 0) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1.0];
+#else
+  UIGraphicsBeginImageContextWithOptions(_boundingBox.size, NO, 0);
 #endif
-#if !TARGET_OS_OSX // [macOS]
-  NSData *imageData = UIImagePNGRepresentation(image);
-  NSString *base64 = [imageData base64EncodedStringWithOptions:NSDataBase64EncodingEndLineWithLineFeed];
-#else // [macOS
+
+  [self clearChildCache];
+  [self drawRect:_boundingBox];
+  [self clearChildCache];
+  [self invalidate];
+
+#if TARGET_OS_OSX
+  [image unlockFocus];
+  NSData *imageData = [image TIFFRepresentation];
+  NSBitmapImageRep *newRep = [NSBitmapImageRep imageRepWithData:imageData];
+  NSData *pngData = [newRep representationUsingType:NSPNGFileType properties:nil];
+  NSString *base64 = [pngData base64EncodedStringWithOptions:NSDataBase64Encoding64CharacterLineLength];
+#else
   NSData *imageData = UIImagePNGRepresentation(UIGraphicsGetImageFromCurrentImageContext());
-  NSString *base64 = [imageData base64EncodedStringWithOptions:NSDataBase64EncodingEndLineWithLineFeed];
+  NSString *base64 = [imageData base64EncodedStringWithOptions:NSDataBase64Encoding64CharacterLineLength];
   UIGraphicsEndImageContext();
-#endif // macOS]
+#endif
+
+  return base64;
+}
+
+- (NSString *)getDataURLwithBounds:(CGRect)bounds
+{
+#if TARGET_OS_OSX
+  NSImage *image = [[NSImage alloc] initWithSize:bounds.size];
+  NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+                                                                  pixelsWide:bounds.size.width
+                                                                  pixelsHigh:bounds.size.height
+                                                               bitsPerSample:8
+                                                             samplesPerPixel:4
+                                                                    hasAlpha:YES
+                                                                    isPlanar:NO
+                                                              colorSpaceName:NSCalibratedRGBColorSpace
+                                                                 bytesPerRow:0
+                                                                bitsPerPixel:0];
+
+  [image addRepresentation:rep];
+  [image lockFocus];
+  
+  // flip y-axis on MacOS
+  CGContextRef context = [NSGraphicsContext currentContext].CGContext;
+  CGContextTranslateCTM(context, 0.0, bounds.size.height);
+  CGContextScaleCTM(context, 1.0, -1.0);
+  [image drawAtPoint:NSMakePoint(0, 0) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1.0];
+#else
+  UIGraphicsBeginImageContextWithOptions(bounds.size, NO, 1);
+#endif
+
+  [self clearChildCache];
+  [self drawRect:bounds];
+  [self clearChildCache];
+  [self invalidate];
+
+#if TARGET_OS_OSX
+  [image unlockFocus];
+  NSData *imageData = [image TIFFRepresentation];
+  NSBitmapImageRep *newRep = [NSBitmapImageRep imageRepWithData:imageData];
+  NSData *pngData = [newRep representationUsingType:NSPNGFileType properties:nil];
+  NSString *base64 = [pngData base64EncodedStringWithOptions:NSDataBase64Encoding64CharacterLineLength];
+#else
+  NSData *imageData = UIImagePNGRepresentation(UIGraphicsGetImageFromCurrentImageContext());
+  NSString *base64 = [imageData base64EncodedStringWithOptions:NSDataBase64Encoding64CharacterLineLength];
+  UIGraphicsEndImageContext();
+#endif
+
   return base64;
 }
 
