@@ -346,7 +346,7 @@ using namespace facebook::react;
   UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:bounds.size];
   UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *_Nonnull rendererContext) {
 #else // [macOS
-  UIGraphicsBeginImageContextWithOptions(bounds.size, NO, 1);
+  UIGraphicsBeginImageContextWithOptions(bounds.size, NO, [NSScreen mainScreen].backingScaleFactor);
 #endif // macOS]
     [self clearChildCache];
     [self drawRect:bounds];
