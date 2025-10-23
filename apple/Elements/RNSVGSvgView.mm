@@ -379,7 +379,15 @@ using namespace facebook::react;
   UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:bounds.size];
   UIImage *image = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *_Nonnull rendererContext) {
 #else // [macOS
-  RNSVGUIGraphicsBeginImageContextWithOptions(bounds.size, NO, 1);
+  CGFloat scale = 1.0;
+  NSWindow *window = self.window;
+  if (window && window.screen) {
+    scale = window.screen.backingScaleFactor;
+  } else {
+    // fallback to main screen if no window is available
+    scale = [NSScreen mainScreen].backingScaleFactor;
+  }
+  RNSVGUIGraphicsBeginImageContextWithOptions(bounds.size, NO, scale);
 #endif // macOS]
     [self clearChildCache];
     [self drawRect:bounds];
